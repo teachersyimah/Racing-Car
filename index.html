@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GT-R Neon Forest Drift</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #05050d;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #gameWrapper {
+            position: relative;
+            width: 900px;
+            height: 600px;
+            box-shadow: 0 0 30px rgba(0, 242, 254, 0.4);
+            border: 3px solid #00f2fe;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* HUD Overlay styling */
+        .hud-panel {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 85%;
+            display: flex;
+            justify-content: space-between;
+            background: rgba(10, 14, 23, 0.85);
+            border: 2px solid #00f2fe;
+            border-radius: 8px;
+            padding: 10px 20px;
+            box-shadow: 0 0 10px #00f2fe;
+            pointer-events: none;
+        }
+
+        .hud-box {
+            text-align: center;
+        }
+
+        .hud-title {
+            font-size: 11px;
+            color: #aaa;
+            letter-spacing: 1px;
+        }
+
+        .hud-value {
+            font-size: 22px;
+            font-weight: bold;
+            color: #00f2fe;
+            text-shadow: 0 0 8px #00f2fe;
+        }
+
+        #score { color: #ffe600; text-shadow: 0 0 8px #ffe600; }
+
+        /* Boost Gauge Overlay */
+        #boostWrapper {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 180px;
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #ff00de;
+            border-radius: 6px;
+            padding: 8px;
+            pointer-events: none;
+        }
+
+        #boostBar {
+            height: 16px;
+            width: 100%;
+            background: #ff00de;
+            box-shadow: 0 0 10px #ff00de;
+            border-radius: 3px;
+            transition: width 0.1s linear;
+        }
+
+        #gameOverlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 13, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #startBtn {
+            padding: 15px 35px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #00f2fe;
+            background: transparent;
+            border: 2px solid #00f2fe;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 0 15px #00f2fe;
+            text-shadow: 0 0 5px #00f2fe;
+            transition: all 0.2s;
+        }
+
+        #startBtn:hover {
+            background: #00f2fe;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameWrapper">
+    <canvas id="canvas" width="900" height="600"></canvas>
+
+    <!-- HUD Overlay -->
+    <div class="hud-panel">
+        <div class="hud-box">
+            <div class="hud-title">SCORE</div>
+            <div id="score" class="hud-value">00000</div>
+        </div>
+        <div class="hud-box">
+            <div class="hud-title">SPEED</div>
+            <div id="speed" class="hud-value">0 KM/H</div>
+        </div>
+        <div class="hud-box">
+            <div class="hud-title">TRACK STATUS</div>
+            <div id="turnInfo" class="hud-value">CURVE AHEAD</div>
+        </div>
+    </div>
+
+    <div id="boostWrapper">
+        <div class="hud-title" style="margin-bottom: 5px;">TURBO NITRO</div>
+        <div id="boostBar"></div>
+    </div>
+
+    <!-- Start / Game Over Screen -->
+    <div id="gameOverlay">
+        <h1 id="mainTitle" style="color:#00f2fe; text-shadow:0 0 15px #00f2fe; font-size:42px; margin-bottom:10px;">GT-R DRIFT RUNNER</h1>
+        <p style="color:#aaa; margin-bottom:30px;">Use LEFT / RIGHT ARROWS to steer & DOWN ARROW for Nitro</p>
+        <button id="startBtn" onclick="startGame()">START RACE</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// UI Elements
+const scoreEl = document.getElementById('score');
+const speedEl = document.getElementById('speed');
+const boostBar = document.getElementById('boostBar');
+const gameOverlay = document.getElementById('gameOverlay');
+const mainTitle = document.getElementById('mainTitle');
+
+// Game State
+let isPlaying = false;
+let score = 0;
+let speed = 0;
+let maxSpeed = 160;
+let distance = 0;
+let nitro = 100;
+
+// Player Position & Steering
+let carX = 450; // Horizontal center on screen
+let carSteer = 0;
+
+// Track & Curve logic
+let curve = 0;
+let targetCurve = 0;
+let curveTimer = 0;
+
+// Controls
+const keys = { Left: false, Right: false, Down: false };
+
+window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') keys.Left = true;
+    if (e.key === 'ArrowRight') keys.Right = true;
+    if (e.key === 'ArrowDown') keys.Down = true;
+});
+
+window.addEventListener('keyup', e => {
+    if (e.key === 'ArrowLeft') keys.Left = false;
+    if (e.key === 'ArrowRight') keys.Right = false;
+    if (e.key === 'ArrowDown') keys.Down = false;
+});
+
+// Environment Objects (Trees along the curving road)
+let roadsideObjects = [];
+for (let i = 0; i < 40; i++) {
+    roadsideObjects.push({
+        z: i * 25,
+        side: i % 2 === 0 ? -1 : 1, // left or right of road
+        type: Math.random() > 0.3 ? 'tree' : 'pine'
+    });
+}
+
+function startGame() {
+    isPlaying = true;
+    score = 0;
+    speed = 0;
+    distance = 0;
+    carX = 450;
+    nitro = 100;
+    gameOverlay.style.display = 'none';
+    requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+    isPlaying = false;
+    gameOverlay.style.display = 'flex';
+    mainTitle.innerText = "CRASH! GAME OVER";
+}
+
+// --- MAIN LOOP ---
+function gameLoop() {
+    if (!isPlaying) return;
+
+    update();
+    render();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function update() {
+    // 1. Handling Acceleration & Nitro
+    let isBoosting = keys.Down && nitro > 0;
+    let topSpeed = isBoosting ? 230 : maxSpeed;
+
+    if (isBoosting) {
+        speed += 1.5;
+        nitro -= 0.6;
+    } else {
+        speed += 0.8;
+        if (nitro < 100) nitro += 0.15;
+    }
+    
+    if (speed > topSpeed) speed = topSpeed;
+
+    distance += speed * 0.1;
+    score += Math.floor(speed * 0.05);
+
+    // 2. Track Curving Dynamics
+    curveTimer++;
+    if (curveTimer > 150) {
+        curveTimer = 0;
+        targetCurve = (Math.random() - 0.5) * 3.5; // New curve direction
+    }
+    curve += (targetCurve - curve) * 0.02; // Smooth transition
+
+    // 3. Steering & Road Physics
+    if (keys.Left) {
+        carX -= 6;
+        carSteer = -0.15;
+    } else if (keys.Right) {
+        carX += 6;
+        carSteer = 0.15;
+    } else {
+        carSteer = 0;
+    }
+
+    // Centrifugal force pushes car on curves
+    carX -= curve * (speed * 0.015);
+
+    // Check off-road collision
+    let roadWidthAtCar = 260;
+    let roadCenterAtCar = 450 + (curve * 30);
+    if (carX < roadCenterAtCar - roadWidthAtCar || carX > roadCenterAtCar + roadWidthAtCar) {
+        speed *= 0.92; // Offroad slowdown
+        if (carX < roadCenterAtCar - roadWidthAtCar - 40 || carX > roadCenterAtCar + roadWidthAtCar + 40) {
+            gameOver(); // Crashed into forest trees
+        }
+    }
+
+    // 4. Update roadside objects
+    roadsideObjects.forEach(obj => {
+        obj.z -= speed * 0.08;
+        if (obj.z < 1) {
+            obj.z += 1000;
+        }
+    });
+
+    // Update UI
+    scoreEl.innerText = score.toString().padStart(5, '0');
+    speedEl.innerText = `${Math.floor(speed)} KM/H`;
+    boostBar.style.width = `${Math.max(0, nitro)}%`;
+}
+
+// --- RENDER FUNCTIONS ---
+function render() {
+    // Background Sky
+    ctx.fillStyle = '#05050d';
+    ctx.fillRect(0, 0, 900, 600);
+
+    // Distant Neon Horizon / Mountains
+    ctx.fillStyle = '#0f1026';
+    ctx.beginPath();
+    ctx.moveTo(0, 250);
+    for(let x = 0; x <= 900; x += 100) {
+        ctx.lineTo(x, 200 + Math.sin(x)*20);
+    }
+    ctx.lineTo(900, 250);
+    ctx.fill();
+
+    // Draw Perspective Curving Road
+    let horizonY = 220;
+    for (let y = 600; y > horizonY; y -= 4) {
+        let perspective = (y - horizonY) / (600 - horizonY); // 0 at horizon, 1 at bottom
+        let currentCurveOffset = Math.pow(1 - perspective, 2) * curve * 120;
+        let roadWidth = 40 + perspective * 480;
+        let centerX = 450 + currentCurveOffset;
+
+        // Grass/Side ground
+        ctx.fillStyle = (Math.floor(distance + y) % 30 < 15) ? '#072016' : '#04140e';
+        ctx.fillRect(0, y, 900, 4);
+
+        // Neon Red/White Rumble Strips
+        let stripWidth = 15 * perspective;
+        ctx.fillStyle = (Math.floor(distance * 0.5 + y * 0.2) % 2 === 0) ? '#ff0055' : '#ffffff';
+        ctx.fillRect(centerX - roadWidth/2 - stripWidth, y, stripWidth, 4);
+        ctx.fillRect(centerX + roadWidth/2, y, stripWidth, 4);
+
+        // Dark Asphalt Road Surface
+        ctx.fillStyle = '#12131a';
+        ctx.fillRect(centerX - roadWidth/2, y, roadWidth, 4);
+
+        // Glowing Center Neon Lines
+        if (Math.floor(distance + y * 0.5) % 40 < 20) {
+            ctx.fillStyle = '#00f2fe';
+            ctx.fillRect(centerX - 2, y, 4, 4);
+        }
+    }
+
+    // Render Neon Forest Trees
+    roadsideObjects.sort((a,b) => b.z - a.z); // Render background trees first
+    roadsideObjects.forEach(obj => {
+        let perspective = 200 / (obj.z + 10);
+        if (perspective > 0 && perspective < 3) {
+            let currentCurveOffset = Math.pow(1 - (1/perspective), 2) * curve * 120;
+            let roadWidth = 40 + (1/perspective) * 480;
+            let centerX = 450 + currentCurveOffset;
+            
+            let treeX = centerX + (obj.side * (roadWidth/2 + 60 * perspective));
+            let treeY = horizonY + (1/perspective) * 380;
+
+            drawNeonTree(treeX, treeY, perspective, obj.type);
+        }
+    });
+
+    // Render Nissan GT-R Player Vehicle
+    drawGTR(carX, 480, carSteer, keys.Down && nitro > 0);
+}
+
+// Draw Neon Style Trees
+function drawNeonTree(x, y, scale, type) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#00ff88';
+
+    // Trunk
+    ctx.fillStyle = '#113311';
+    ctx.fillRect(-4, -10, 8, 20);
+
+    // Leaves / Foliage
+    ctx.beginPath();
+    ctx.moveTo(0, -60);
+    ctx.lineTo(-25, -10);
+    ctx.lineTo(25, -10);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+// Detailed Nissan GT-R Drawing Function
+function drawGTR(x, y, steerAngle, isBoosting) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(steerAngle);
+
+    // Exhaust Flames on Nitro
+    if (isBoosting) {
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#ff00de';
+        ctx.fillStyle = '#ff00de';
+        ctx.beginPath();
+        ctx.arc(-35, 45 + Math.random()*10, 8, 0, Math.PI*2);
+        ctx.arc(35, 45 + Math.random()*10, 8, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    // GT-R Car Body Structure (Metallic Blue Finish)
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = '#00f2fe';
+    
+    // Main Body Frame
+    ctx.fillStyle = '#0066cc';
+    ctx.beginPath();
+    ctx.roundRect(-55, -40, 110, 80, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#00f2fe';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // GT-R Roof & Rear Window Structure
+    ctx.fillStyle = '#080810';
+    ctx.beginPath();
+    ctx.roundRect(-42, -25, 84, 45, 8);
+    ctx.fill();
+
+    // GT-R Signature Large Rear Wing Spoiler
+    ctx.fillStyle = '#05050a';
+    ctx.fillRect(-58, 28, 116, 10);
+    ctx.fillStyle = '#00f2fe';
+    ctx.fillRect(-58, 28, 10, 10);
+    ctx.fillRect(48, 28, 10, 10);
+
+    // Side Rearview Mirrors
+    ctx.fillStyle = '#0066cc';
+    ctx.fillRect(-62, -20, 8, 12);
+    ctx.fillRect(54, -20, 8, 12);
+
+    // Iconic Twin Circular GT-R Taillights (Glowing Red)
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#ff0033';
+    ctx.fillStyle = '#ff0033';
+    
+    // Outer Lights
+    ctx.beginPath(); ctx.arc(-38, 38, 7, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(38, 38, 7, 0, Math.PI*2); ctx.fill();
+    // Inner Lights
+    ctx.beginPath(); ctx.arc(-22, 38, 5.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(22, 38, 5.5, 0, Math.PI*2); ctx.fill();
+
+    ctx.restore();
+}
+</script>
+</body>
+</html>
